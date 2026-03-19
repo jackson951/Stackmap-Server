@@ -182,3 +182,47 @@ export const getCurrentUser = async (
     return res.status(500).json({ error: "Failed to fetch user profile" });
   }
 };
+
+/**
+ * Delete user account and all associated data
+ */
+export const deleteAccount = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userId = req.user.id;
+
+    // Delete all related data in the correct order to avoid foreign key constraint issues
+    await prisma.$transaction([
+      // Delete queries first (they reference both user and repo)
+      prisma.query.deleteMany({
+        where: { userId },
+      }),
+      // Delete repo files (they reference repo)
+      prisma.repoFile.deleteMany({
+        where: {
+          repo: {
+            userId,
+          },
+        },
+      }),
+      // Delete repos
+      prisma.repo.deleteMany({
+        where: { userId },
+      }),
+      // Finally delete the user
+      prisma.user.delete({
+        where: { id: userId },
+      }),
+    ]);
+
+    return res.json({ 
+      success: true, 
+      message: "Account and all associated data have been permanently deleted" 
+    });
+  } catch (error) {
+    console.error("deleteAccount failed", error);
+    return res.status(500).json({ error: "Failed to delete account" });
+  }
+};
