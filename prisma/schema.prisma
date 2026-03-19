@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+
+}
+
+model User {
+  id          String   @id @default(cuid())
+  githubId    String   @unique
+  username    String
+  email       String?
+  avatarUrl   String?
+  accessToken String
+  createdAt   DateTime @default(now())
+
+  repos   Repo[]
+  queries Query[]
+}
+
+model Repo {
+  id           String      @id @default(cuid())
+  userId       String
+  githubRepoId String
+  name         String
+  fullName     String
+  description  String?
+  language     String?
+  isIndexed    Boolean     @default(false)
+  indexedAt    DateTime?
+  createdAt    DateTime    @default(now())
+
+  user   User     @relation(fields: [userId], references: [id])
+  files  RepoFile[]
+  queries Query[]
+}
+
+model RepoFile {
+  id          String   @id @default(cuid())
+  repoId      String
+  path        String
+  name        String
+  extension   String?
+  size        Int?
+  commitCount Int      @default(0)
+  content     String?
+  summary     String?
+
+  repo Repo @relation(fields: [repoId], references: [id])
+}
+
+model Query {
+  id             String    @id @default(cuid())
+  userId         String
+  repoId         String
+  question       String
+  answer         String
+  filesReferenced String[]
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  repo Repo @relation(fields: [repoId], references: [id])
+}
