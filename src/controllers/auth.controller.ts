@@ -6,20 +6,27 @@ import { AuthenticatedRequest } from "../middleware/auth";
 
 const githubClientId = process.env.GITHUB_CLIENT_ID;
 const githubClientSecret = process.env.GITHUB_CLIENT_SECRET;
-const backendUrl = process.env.BACKEND_URL ?? `http://localhost:${process.env.PORT ?? 5000}`;
+const backendUrl =
+  process.env.BACKEND_URL ?? `http://localhost:${process.env.PORT ?? 5000}`;
 const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:3000";
 const jwtSecret = process.env.JWT_SECRET;
 
 if (!githubClientId || !githubClientSecret) {
-  throw new Error("Missing GitHub OAuth credentials (GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET)");
+  throw new Error(
+    "Missing GitHub OAuth credentials (GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET)"
+  );
 }
 
 if (!jwtSecret) {
   throw new Error("Missing JWT_SECRET environment variable");
 }
 
+/**
+ * STEP 1: Redirect user to GitHub
+ */
 export const githubRedirect = (_req: Request, res: Response) => {
   const callbackUrl = `${backendUrl}/api/auth/github/callback`;
+
   const params = new URLSearchParams({
     client_id: githubClientId,
     redirect_uri: callbackUrl,
@@ -27,19 +34,27 @@ export const githubRedirect = (_req: Request, res: Response) => {
     allow_signup: "true",
   });
 
-  return res.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
+  return res.redirect(
+    `https://github.com/login/oauth/authorize?${params.toString()}`
+  );
 };
 
+/**
+ * STEP 2: GitHub redirects back here
+ */
 export const githubCallback = async (req: Request, res: Response) => {
   const code = String(req.query.code || "");
 
   if (!code) {
-    return res.status(400).json({ error: "Missing code from GitHub" });
+    return res.redirect(`${frontendUrl}/auth/error?message=missing_code`);
   }
 
   try {
     const callbackUrl = `${backendUrl}/api/auth/github/callback`;
 
+    /**
+     * Exchange code for access token
+     */
     const tokenResponse = await axios.post(
       "https://github.com/login/oauth/access_token",
       {
@@ -49,36 +64,55 @@ export const githubCallback = async (req: Request, res: Response) => {
         redirect_uri: callbackUrl,
       },
       {
-        headers: {
-          Accept: "application/json",
-        },
+        headers: { Accept: "application/json" },
       }
     );
 
     const accessToken = tokenResponse.data.access_token;
 
     if (!accessToken) {
-      return res.status(400).json({ error: "Unable to retrieve access token from GitHub" });
+      return res.redirect(`${frontendUrl}/auth/error?message=no_access_token`);
     }
 
-    const profileResponse = await axios.get("https://api.github.com/user", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    /**
+     * Get GitHub user profile
+     */
+    const profileResponse = await axios.get(
+      "https://api.github.com/user",
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
 
     const githubId = String(profileResponse.data.id);
     const username = profileResponse.data.login;
     const avatarUrl = profileResponse.data.avatar_url;
     let email = profileResponse.data.email;
 
+    /**
+     * Fallback to emails endpoint if email is null
+     */
     if (!email) {
-      const emailResponse = await axios.get("https://api.github.com/user/emails", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const emailResponse = await axios.get(
+        "https://api.github.com/user/emails",
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
 
-      const primaryEmail = emailResponse.data.find((entry: any) => entry.primary && entry.verified);
-      email = primaryEmail?.email ?? emailResponse.data[0]?.email ?? null;
+      const primaryEmail = emailResponse.data.find(
+        (entry: any) => entry.primary && entry.verified
+      );
+
+      email =
+        primaryEmail?.email ??
+        emailResponse.data[0]?.email ??
+        null;
     }
 
+    /**
+     * Upsert user in DB
+     */
     const user = await prisma.user.upsert({
       where: { githubId },
       update: {
@@ -96,16 +130,35 @@ export const githubCallback = async (req: Request, res: Response) => {
       },
     });
 
-    const token = jwt.sign({ userId: user.id, githubId: user.githubId }, jwtSecret, { expiresIn: "24h" });
+    /**
+     * Generate JWT
+     */
+    const token = jwt.sign(
+      { userId: user.id, githubId: user.githubId },
+      jwtSecret,
+      { expiresIn: "24h" }
+    );
 
-    return res.redirect(`${frontendUrl}/dashboard?token=${token}`);
+    /**
+     * ✅ IMPORTANT: Redirect to frontend callback page
+     */
+    return res.redirect(
+      `${frontendUrl}/auth/callback?token=${token}`
+    );
+
   } catch (error) {
     console.error("GitHub callback failed", error);
-    return res.status(500).json({ error: "Failed to complete GitHub OAuth flow" });
+    return res.redirect(`${frontendUrl}/auth/error?message=oauth_failed`);
   }
 };
 
-export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) => {
+/**
+ * STEP 3: Get current user (protected route)
+ */
+export const getCurrentUser = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
