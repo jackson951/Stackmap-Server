@@ -22,7 +22,14 @@ export const indexRepository = async (repoId: string, token: string) => {
     throw new Error("Repo not found");
   }
 
-  const tree = await getRepoTree(repo.fullName, token);
+  let tree;
+  try {
+    tree = await getRepoTree(repo.fullName, token);
+  } catch (error) {
+    console.error("Failed to get repo tree:", error);
+    throw new Error("Failed to fetch repository tree from GitHub");
+  }
+
   const githubFiles = tree.filter(
     (node) => node.type === "blob" && !shouldSkipPath(node.path ?? "")
   );
@@ -54,14 +61,26 @@ export const indexRepository = async (repoId: string, token: string) => {
       if (needsSummary(file.path)) {
         try {
           content = await getFileContent(repo.fullName, file.path, token);
-          // summary = await summarizeFile(file.path, content || "");
-        } catch {}
+          if (content) {
+            // Check if content contains binary data (null bytes)
+            if (content.includes('\x00')) {
+              console.warn(`Skipping binary content for ${file.path}`);
+              content = null;
+            } else {
+              // summary = await summarizeFile(file.path, content);
+            }
+          }
+        } catch (error) {
+          console.error(`Failed to get content for ${file.path}:`, error);
+        }
       }
 
       let commitCount = 0;
       try {
         commitCount = await getCommitCount(repo.fullName, file.path, token);
-      } catch {}
+      } catch (error) {
+        console.error(`Failed to get commit count for ${file.path}:`, error);
+      }
 
       await prisma.repoFile.create({
         data: {
