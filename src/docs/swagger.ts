@@ -43,6 +43,13 @@ const swaggerSpec = {
           queryId: { type: "string" },
         },
       },
+      DeletionResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          message: { type: "string" },
+        },
+      },
     },
   },
   security: [{ bearerAuth: [] }],
@@ -104,6 +111,23 @@ const swaggerSpec = {
             },
           },
           401: { $ref: "#/components/schemas/ErrorResponse" },
+        },
+      },
+      delete: {
+        tags: ["Auth"],
+        summary: "Delete the authenticated user and all their data",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: "Account deleted",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/DeletionResponse" },
+              },
+            },
+          },
+          401: { $ref: "#/components/schemas/ErrorResponse" },
+          500: { $ref: "#/components/schemas/ErrorResponse" },
         },
       },
     },
@@ -207,6 +231,51 @@ const swaggerSpec = {
           200: {
             description: "Indexed files",
           },
+        },
+      },
+    },
+    "/api/repos/{repoId}/files/content": {
+      get: {
+        tags: ["Indexing"],
+        summary: "Retrieve the latest text for a single file",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "repoId",
+            in: "path",
+            schema: { type: "string" },
+            required: true,
+          },
+          {
+            name: "path",
+            in: "query",
+            schema: { type: "string" },
+            required: true,
+            description: "Path inside the repository to fetch",
+          },
+        ],
+        responses: {
+          200: {
+            description: "File contents",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    path: { type: "string" },
+                    name: { type: "string" },
+                    extension: { type: "string", nullable: true },
+                    size: { type: "integer" },
+                    summary: { type: "string", nullable: true },
+                    content: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          400: { $ref: "#/components/schemas/ErrorResponse" },
+          404: { $ref: "#/components/schemas/ErrorResponse" },
+          500: { $ref: "#/components/schemas/ErrorResponse" },
         },
       },
     },

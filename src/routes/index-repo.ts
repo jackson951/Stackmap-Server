@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { indexRepository } from "../services/indexer.service";
 import { authGuard, AuthenticatedRequest } from "../middleware/auth";
 import prisma from "../lib/prisma";
+import { getRepoFileContent } from "../controllers/files.controller";
 
 const router = Router();
 
@@ -73,5 +74,9 @@ router.get("/:repoId/files", async (req: Request, res: Response) => {
       details: error instanceof Error ? error.message : "Unknown error"
     });
   }
+});
+
+router.get("/:repoId/files/content", async (req: Request, res: Response) => {
+  return getRepoFileContent(req as AuthenticatedRequest, res);
 });
 export default router;
