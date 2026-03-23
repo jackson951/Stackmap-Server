@@ -19,40 +19,68 @@ export const listRepos = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: "No GitHub access token found" });
     }
 
-    // Fetch GitHub repos
-    const githubResponse = await axios.get("https://api.github.com/user/repos", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { per_page: 100, sort: "updated" },
-    });
+    // First, try to fetch GitHub repos
+    let githubRepos: GitHubRepo[] = [];
+    let fetchError: any = null;
 
-    const githubRepos: GitHubRepo[] = githubResponse.data.map((repo: any) => ({
-      githubRepoId: String(repo.id),
-      name: repo.name,
-      fullName: repo.full_name,
-      description: repo.description,
-      language: repo.language,
-      htmlUrl: repo.html_url,
-    }));
+    try {
+      const githubResponse = await axios.get("https://api.github.com/user/repos", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { per_page: 100, sort: "updated" },
+      });
 
-    // Fetch DB repos for this user
+      githubRepos = githubResponse.data.map((repo: any) => ({
+        githubRepoId: String(repo.id),
+        name: repo.name,
+        fullName: repo.full_name,
+        description: repo.description,
+        language: repo.language,
+        htmlUrl: repo.html_url,
+      }));
+    } catch (error) {
+      fetchError = error;
+      console.error("Failed to fetch GitHub repos:", error);
+      
+      // If GitHub API call fails, log the error but continue with existing DB repos
+      // This handles cases where the token might be invalid or permissions issues
+    }
+
+    // Fetch existing DB repos for this user
     const dbRepos = await prisma.repo.findMany({ where: { userId: req.user.id } });
-    const dbRepoMap = new Map(dbRepos.map(r => [r.githubRepoId, r]));
+    
+    // If we successfully fetched GitHub repos, upsert them
+    if (githubRepos.length > 0) {
+      const dbRepoMap = new Map(dbRepos.map(r => [r.githubRepoId, r]));
 
-    // Upsert GitHub repos into DB
-    const upsertPromises = githubRepos.map((repo: GitHubRepo) => {
-      const existing = dbRepoMap.get(repo.githubRepoId);
+      // Upsert GitHub repos into DB
+      const upsertPromises = githubRepos.map((repo: GitHubRepo) => {
+        const existing = dbRepoMap.get(repo.githubRepoId);
 
-      if (existing) {
-        // Update if any changes
-        if (
-          existing.name !== repo.name ||
-          existing.fullName !== repo.fullName ||
-          existing.description !== repo.description ||
-          existing.language !== repo.language
-        ) {
-          return prisma.repo.update({
-            where: { id: existing.id },
+        if (existing) {
+          // Update if any changes
+          if (
+            existing.name !== repo.name ||
+            existing.fullName !== repo.fullName ||
+            existing.description !== repo.description ||
+            existing.language !== repo.language
+          ) {
+            return prisma.repo.update({
+              where: { id: existing.id },
+              data: {
+                name: repo.name,
+                fullName: repo.fullName,
+                description: repo.description,
+                language: repo.language,
+              },
+            });
+          }
+          return null; // no changes
+        } else {
+          // Insert new repo
+          return prisma.repo.create({
             data: {
+              userId: req.user.id,
+              githubRepoId: repo.githubRepoId,
               name: repo.name,
               fullName: repo.fullName,
               description: repo.description,
@@ -60,26 +88,31 @@ export const listRepos = async (req: AuthenticatedRequest, res: Response) => {
             },
           });
         }
-        return null; // no changes
-      } else {
-        // Insert new repo
-        return prisma.repo.create({
-          data: {
-            userId: req.user.id,
-            githubRepoId: repo.githubRepoId,
-            name: repo.name,
-            fullName: repo.fullName,
-            description: repo.description,
-            language: repo.language,
-          },
-        });
-      }
-    });
+      });
 
-    await Promise.all(upsertPromises.filter(Boolean));
+      await Promise.all(upsertPromises.filter(Boolean));
+    } else if (fetchError) {
+      // GitHub API failed, but we might have existing repos in DB
+      // Return existing repos with a warning
+      return res.json({ 
+        repos: dbRepos,
+        warning: "Could not fetch latest repositories from GitHub. Showing cached repositories.",
+        error: fetchError?.response?.data?.message || "GitHub API request failed"
+      });
+    }
 
-    // Return updated DB repos
+    // Return final repos from DB (either updated or existing)
     const finalRepos = await prisma.repo.findMany({ where: { userId: req.user.id } });
+    
+    // If no repos found and GitHub API failed, provide helpful error message
+    if (finalRepos.length === 0 && fetchError) {
+      return res.status(500).json({ 
+        error: "Failed to fetch repositories from GitHub and no cached repositories found",
+        details: fetchError?.response?.data?.message || "GitHub API request failed",
+        suggestion: "Please ensure your GitHub token has the necessary permissions and try refreshing your authentication"
+      });
+    }
+
     return res.json({ repos: finalRepos });
   } catch (error) {
     console.error("listRepos failed", error);

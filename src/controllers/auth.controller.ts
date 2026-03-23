@@ -75,6 +75,18 @@ export const githubCallback = async (req: Request, res: Response) => {
     }
 
     /**
+     * Validate the access token by making a test API call
+     */
+    try {
+      await axios.get("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    } catch (tokenError) {
+      console.error("Invalid access token received:", tokenError);
+      return res.redirect(`${frontendUrl}/auth/error?message=invalid_token`);
+    }
+
+    /**
      * Get GitHub user profile
      */
     const profileResponse = await axios.get(
