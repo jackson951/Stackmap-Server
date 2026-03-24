@@ -4,8 +4,18 @@ import axios from "axios";
 import prisma from "../lib/prisma";
 import { AuthenticatedRequest } from "../middleware/auth";
 
-const githubClientId = process.env.GITHUB_CLIENT_ID;
-const githubClientSecret = process.env.GITHUB_CLIENT_SECRET;
+const githubClientId = process.env.NODE_ENV === 'production'
+  ? process.env.GITHUB_CLIENT_ID
+  : process.env.GITHUB_CLIENT_ID_DEV;
+
+const githubClientSecret = process.env.NODE_ENV === 'production'
+  ? process.env.GITHUB_CLIENT_SECRET
+  : process.env.GITHUB_CLIENT_SECRET_DEV;
+
+const githubCallbackURL = process.env.NODE_ENV === 'production'
+  ? 'https://stackmap-server.onrender.com/api/auth/github/callback'  // ← add /api
+  : 'http://localhost:5000/api/auth/github/callback';   // ← add /api
+
 const backendUrl =
   process.env.BACKEND_URL ?? `http://localhost:${process.env.PORT ?? 5000}`;
 const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:3000";
@@ -25,11 +35,9 @@ if (!jwtSecret) {
  * STEP 1: Redirect user to GitHub
  */
 export const githubRedirect = (_req: Request, res: Response) => {
-  const callbackUrl = `${backendUrl}/api/auth/github/callback`;
-
   const params = new URLSearchParams({
     client_id: githubClientId,
-    redirect_uri: callbackUrl,
+    redirect_uri: githubCallbackURL,
     scope: "repo read:user user:email",
     allow_signup: "true",
   });
@@ -50,8 +58,6 @@ export const githubCallback = async (req: Request, res: Response) => {
   }
 
   try {
-    const callbackUrl = `${backendUrl}/api/auth/github/callback`;
-
     /**
      * Exchange code for access token
      */
@@ -61,7 +67,7 @@ export const githubCallback = async (req: Request, res: Response) => {
         client_id: githubClientId,
         client_secret: githubClientSecret,
         code,
-        redirect_uri: callbackUrl,
+        redirect_uri: githubCallbackURL,
       },
       {
         headers: { Accept: "application/json" },
