@@ -12,10 +12,10 @@ dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 5000);
-const frontendUrl = process.env.FRONTEND_URL ??"https://stackmap-8ipx.vercel.app";
+const frontendUrl = process.env.FRONTEND_URL ??"http://localhost:3000";
 
 app.use(cors({ 
-  origin: [frontendUrl, "https://stackmap-server.onrender.com", "http://localhost:5000"],
+  origin: frontendUrl,
   credentials: true
 }));
 app.use(express.json());
